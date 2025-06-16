@@ -6,64 +6,77 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-// Load environment variables
 const dbURI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 5000;
 
-// Define the schema for product items
+// 🔁 Product Schema
 const productSchema = new mongoose.Schema({
   name: String,
   description: String,
   category: String,
-  images: [String],  // Array of image URLs or file paths
-  price: { default: Number },  // Default price for the product
-  regional_prices: {
-    AP: Number,  // Price for the Andhra Pradesh region
-    TS: Number,  // Price for the Telangana region
+  images: [String],
+  tags: [String],
+  price_by_pincode: {
+    type: Map,
+    of: new mongoose.Schema({
+      price: Number,
+      currency: { type: String, default: 'INR' },
+      stock: Number,
+      available: Boolean
+    }, { _id: false })
   },
-  availability: [String],  // Array of available locations or statuses
-  tags: [String],  // Array of tags for categorization or features
   created_at: { type: Date, default: Date.now },
-  updated_at: { type: Date, default: Date.now },
+  updated_at: { type: Date, default: Date.now }
 });
 
-// Create a model based on the schema
+// Create model
 const Product = mongoose.model('Product', productSchema, 'product_items');
 
-// Connect to MongoDB
+// 🧠 Connect to MongoDB
 mongoose.connect(dbURI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   serverSelectionTimeoutMS: 30000,
   bufferCommands: false,
 })
-  .then(() => console.log('Successfully connected to MongoDB Atlas'))
-  .catch((error) => {
-    console.error('MongoDB connection error:', error);
-    process.exit(1);
-  });
+.then(() => console.log('✅ Connected to MongoDB Atlas'))
+.catch((error) => {
+  console.error('❌ MongoDB connection error:', error);
+  process.exit(1);
+});
 
-// Define an endpoint to fetch products with optional category filter
+// 🚀 API: Fetch Products with Filters
 app.get('/api/products', async (req, res) => {
   try {
-    const { category } = req.query;  // Get category from the query parameters
-    
-    let filter = {};  // Default filter is an empty object, meaning no filter
-    
+    const { pincode, category, availableOnly } = req.query;
+
+    const filter = {};
+
+    // Optional category filter
     if (category) {
-      filter.category = category;  // If category is provided, add it to the filter
+      filter.category = category;
     }
 
-    const products = await Product.find(filter);  // Fetch products based on the filter
-    console.log('Fetched Products:', products);  // Log the fetched products
-    res.json(products);  // Send the data as JSON response
+    // Filter by availability and stock at a given pincode
+    if (pincode) {
+      const availabilityPath = `price_by_pincode.${pincode}.available`;
+      filter[availabilityPath] = true;
+
+      if (availableOnly === 'true') {
+        const stockPath = `price_by_pincode.${pincode}.stock`;
+        filter[stockPath] = { $gt: 0 };
+      }
+    }
+
+    const products = await Product.find(filter);
+    res.json(products);
   } catch (error) {
-    console.error('Error fetching products:', error);
+    console.error('❌ Error fetching products:', error);
     res.status(500).json({ message: 'Error fetching products', error: error.message });
   }
 });
 
-// Start the server
+// 🟢 Server Start
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
