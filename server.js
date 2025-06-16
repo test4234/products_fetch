@@ -6,77 +6,93 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+// Load environment variables
 const dbURI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 5000;
 
-// 🔁 Product Schema
+// Define the schema for product items
 const productSchema = new mongoose.Schema({
   name: String,
   description: String,
   category: String,
   images: [String],
-  tags: [String],
   price_by_pincode: {
     type: Map,
-    of: new mongoose.Schema({
+    of: {
       price: Number,
-      currency: { type: String, default: 'INR' },
+      currency: String,
       stock: Number,
-      available: Boolean
-    }, { _id: false })
+      available: Boolean,
+    },
   },
+  tags: [String],
   created_at: { type: Date, default: Date.now },
-  updated_at: { type: Date, default: Date.now }
+  updated_at: { type: Date, default: Date.now },
 });
 
-// Create model
+// Create a model based on the schema
 const Product = mongoose.model('Product', productSchema, 'product_items');
 
-// 🧠 Connect to MongoDB
+// Connect to MongoDB
 mongoose.connect(dbURI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   serverSelectionTimeoutMS: 30000,
   bufferCommands: false,
 })
-.then(() => console.log('✅ Connected to MongoDB Atlas'))
-.catch((error) => {
-  console.error('❌ MongoDB connection error:', error);
-  process.exit(1);
-});
+  .then(() => console.log('Successfully connected to MongoDB Atlas'))
+  .catch((error) => {
+    console.error('MongoDB connection error:', error);
+    process.exit(1);
+  });
 
-// 🚀 API: Fetch Products with Filters
+// Define an endpoint to fetch products based on pincode
 app.get('/api/products', async (req, res) => {
   try {
-    const { pincode, category, availableOnly } = req.query;
+    const { pincode } = req.query;
 
-    const filter = {};
-
-    // Optional category filter
-    if (category) {
-      filter.category = category;
+    if (!pincode) {
+      return res.status(400).json({ message: 'Pincode is required' });
     }
 
-    // Filter by availability and stock at a given pincode
-    if (pincode) {
-      const availabilityPath = `price_by_pincode.${pincode}.available`;
-      filter[availabilityPath] = true;
+    // Get raw JS objects with lean(), so bracket notation works
+    const products = await Product.find({
+      [`price_by_pincode.${pincode}.available`]: true,
+    }).lean();
 
-      if (availableOnly === 'true') {
-        const stockPath = `price_by_pincode.${pincode}.stock`;
-        filter[stockPath] = { $gt: 0 };
-      }
+    if (!products.length) {
+      return res.status(404).json({ message: 'No products available for the selected pincode' });
     }
 
-    const products = await Product.find(filter);
-    res.json(products);
+    // Return only necessary data with selected pincode pricing
+    const filtered = products.map(product => {
+      const priceData = product.price_by_pincode[pincode];
+
+      return {
+        _id: product._id,
+        name: product.name,
+        description: product.description,
+        category: product.category,
+        images: product.images,
+        tags: product.tags,
+        created_at: product.created_at,
+        updated_at: product.updated_at,
+        price: priceData.price,
+        currency: priceData.currency,
+        stock: priceData.stock,
+        available: priceData.available,
+      };
+    });
+
+    res.json(filtered);
   } catch (error) {
-    console.error('❌ Error fetching products:', error);
+    console.error('Error fetching products:', error);
     res.status(500).json({ message: 'Error fetching products', error: error.message });
   }
 });
 
-// 🟢 Server Start
+
+// Start the server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
